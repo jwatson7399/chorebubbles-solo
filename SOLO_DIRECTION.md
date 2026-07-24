@@ -7,7 +7,7 @@ This repository is the independent single-person fork of ChoreBubbles.
 - All solo-oriented product and data-model work belongs in this repository.
 - The original `/Users/julian/Claude Code/chorebubbles` repository remains the Kristine/Julian shared-household application.
 - This repository intentionally has no Git remote until a separate destination is chosen.
-- Supabase configuration and deployment credentials must not be reused without an explicit migration decision.
+- The initial fork runs local-only under its own storage ID; Supabase configuration and deployment credentials must not be reused without an explicit migration decision.
 
 ## Preserve
 
