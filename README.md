@@ -1,6 +1,10 @@
-# ChoreBubbles 🫧
+# ChoreBubbles Solo 🫧
 
-A shared household chore ecosystem for two people. Chores are living bubbles that swell as they go undone, weighted by importance and goal frequency. Tap a bubble to complete a chore. Each person gets a rolling seven-active-day effort tally, a cleaning service can batch-reset chores without crediting anyone, and the household's wellbeing is summarized in one health bar.
+This is an independent single-person fork of ChoreBubbles. It preserves the complete two-person application as its starting baseline so the solo conversion can happen deliberately without changing or deploying the Kristine/Julian project.
+
+See [`SOLO_DIRECTION.md`](SOLO_DIRECTION.md) for the boundary and initial conversion plan.
+
+The inherited application is a shared household chore ecosystem for two people. Chores are living bubbles that swell as they go undone, weighted by importance and goal frequency. Tap a bubble to complete a chore. Each person gets a rolling seven-active-day effort tally, a cleaning service can batch-reset chores without crediting anyone, and the household's wellbeing is summarized in one health bar.
 
 The installable PWA runs full-screen from each phone and securely syncs shared state through Supabase.
 
