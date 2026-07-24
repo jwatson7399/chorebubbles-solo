@@ -30,6 +30,7 @@ import {
 } from "./choreHistory.js";
 import { clampBubbleCenter, releaseBubbleNode } from "./bubblePhysics.js";
 import { bubbleHitDiameter, rankBubbleTargets, usesCompactBubbleLabel } from "./bubblePresentation.js";
+import { creditedCompletionIds, shouldPulseHealth } from "./healthPulse.js";
 import {
   advanceTwoStepChore,
   disableTwoStepChore,
@@ -817,8 +818,9 @@ export default function ChoreBubbles() {
   const [introOpen, setIntroOpen] = useState(false);
   const [suggestionSeed, setSuggestionSeed] = useState(0);
   const [bubbleSuggestionsVisible, setBubbleSuggestionsVisible] = useState(false);
-  const [healthPulse, setHealthPulse] = useState(false);
+  const [healthPulse, setHealthPulse] = useState(0);
   const prevHealthRef = useRef(null);
+  const knownCreditedCompletionIdsRef = useRef(null);
   const pulseTimer = useRef(null);
   const toastTimer = useRef(null);
   const popTimer = useRef(null);
@@ -1128,16 +1130,24 @@ export default function ChoreBubbles() {
     showToast("Board reset — every chore marked fresh");
   };
 
-  // Pulse the health bar green whenever the score rises
+  // Pulse for every newly observed personal completion, including a gain too
+  // small to change the rounded percentage. Exact score comparisons preserve
+  // the previous behavior for other health improvements.
   useEffect(() => {
     if (!view) return;
-    const pct = Math.round(healthScore(view.chores, view.completions, view.pauses || []) * 100);
-    if (prevHealthRef.current != null && pct > prevHealthRef.current) {
-      setHealthPulse(true);
+    const score = healthScore(view.chores, view.completions, view.pauses || []);
+    if (shouldPulseHealth(
+      prevHealthRef.current,
+      score,
+      knownCreditedCompletionIdsRef.current,
+      view.completions
+    )) {
+      setHealthPulse((sequence) => sequence + 1);
       if (pulseTimer.current) clearTimeout(pulseTimer.current);
-      pulseTimer.current = setTimeout(() => setHealthPulse(false), 1400);
+      pulseTimer.current = setTimeout(() => setHealthPulse(0), 1400);
     }
-    prevHealthRef.current = pct;
+    prevHealthRef.current = score;
+    knownCreditedCompletionIdsRef.current = creditedCompletionIds(view.completions);
   }, [view]);
 
   if (!authReady) {
@@ -1297,6 +1307,7 @@ export default function ChoreBubbles() {
           </div>
           <div style={{ position: "relative", height: 10, borderRadius: 6, background: "#0F2530", border: "1px solid #1E4152", overflow: "visible" }}>
             <div
+              key={`health-fill-${healthPulse}`}
               style={{
                 position: "absolute",
                 left: 0,
