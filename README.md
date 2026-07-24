@@ -1,105 +1,73 @@
 # ChoreBubbles Solo 🫧
 
-This is an independent single-person fork of ChoreBubbles. It preserves the complete two-person application as its starting baseline so the solo conversion can happen deliberately without changing or deploying the Kristine/Julian project.
+ChoreBubbles Solo is an independent, single-person PWA for keeping a home in rhythm. Chores are living bubbles that swell as they become due. Completing one resets its bubble and adds its effort to one rolling seven-active-day tally.
 
-See [`SOLO_DIRECTION.md`](SOLO_DIRECTION.md) for the boundary and initial conversion plan.
-
-The inherited application is a shared household chore ecosystem for two people. Chores are living bubbles that swell as they go undone, weighted by importance and goal frequency. Tap a bubble to complete a chore. Each person gets a rolling seven-active-day effort tally, a cleaning service can batch-reset chores without crediting anyone, and the household's wellbeing is summarized in one health bar.
-
-The installable PWA runs full-screen from each phone and securely syncs shared state through Supabase.
+This repository is separate from the Kristine/Julian household app. It has its own package name, PWA identity, local storage namespace, data ID, schema setup, and no Git remote by default. See [`SOLO_DIRECTION.md`](SOLO_DIRECTION.md) for the project boundary and migration notes.
 
 ## Features
 
-- Bubble field with gentle physics, drag to rearrange, tap to complete
-- Importance, difficulty, and goal frequency per chore
-- Last-done banners and complete per-chore activity histories
-- Optional two-step chores with independently scored, alternating bubbles
-- Per-person rolling seven-active-day effort tallies with visible Getting started, Maintaining, and On top of it! zones
-- Full credit for both people on joint completions
-- Goal-closing chore suggestions that prioritize due and approaching-due work
-- Main-screen suggestion shuffle with glowing bubble highlights
-- Previous-period recap, household total, and shared streak
+- Fluid bubble field with drag, release, and tap-to-complete interactions
+- Readable compact labels for small bubbles
+- Importance, effort, and goal frequency per chore
+- Last-done banners and full per-chore histories
+- Optional two-step chores with independently configured alternating bubbles
+- One rolling seven-active-day effort tally with Getting started, Maintaining, and On top of it! zones
+- Goal-closing suggestions with glowing bubble highlights and an off toggle
+- Previous-period recap and solo green-zone streak
+- Vacation pause that freezes bubble growth and the rolling tally
 - Cleaning-service and board resets without effort credit
-- Whole-household and per-person vacation pauses
-- Seven-level household health mood
-- Local time-machine sandbox for previewing bubble growth and effort windows
-- Offline app shell and durable local write queue
-- Conflict-safe multi-phone saves using optimistic row revisions
-- Passwordless email authentication with a two-person database allowlist
+- Local time-machine sandbox for previewing growth and effort windows
+- Installable offline PWA with a durable local write queue
+- Optional passwordless Supabase sync for the owner's approved email
 
-## 1. Configure Supabase
+## Local-only setup
 
-Create a free project at [supabase.com](https://supabase.com).
-
-In **Authentication → Providers → Email**, enable email authentication. Magic-link sign-in is passwordless; users must control one of the two allowed email addresses.
-
-In **Authentication → URL Configuration**, add the final GitHub Pages URL to the allowed redirect URLs. During development, also add the local Vite URL (normally `http://localhost:5173`).
-
-Open `supabase-schema.sql` and replace these three placeholders:
-
-- `REPLACE_WITH_YOUR_HOUSEHOLD_ID` with a long random household ID
-- `person.one@example.com` with the first member's email
-- `person.two@example.com` with the second member's email
-
-Run the edited SQL file in the Supabase SQL Editor. It works for a new project and also migrates the original ChoreBubbles table without erasing its existing `value` data.
-
-The database now permits reads and updates only when the signed-in user's verified email appears in that household row. The public anon key alone cannot read or modify chore data.
-
-## 2. Configure the app
-
-Edit `src/config.js`:
-
-```js
-export const SUPABASE_URL = "https://xxxx.supabase.co";
-export const SUPABASE_ANON_KEY = "eyJ...";
-export const HOUSEHOLD_ID = "the-same-random-id-used-in-the-sql-file";
-```
-
-The URL and anon key are intentionally public client credentials; security comes from Supabase authentication and row-level policies. The household ID selects the row but does not grant access to it.
-
-Leaving `SUPABASE_URL` empty keeps the app in single-device local-only mode, without a sign-in screen.
-
-## 3. Deploy to GitHub Pages
-
-1. Create a repository and push this project to `main`.
-2. In repository **Settings → Pages**, set the source to **GitHub Actions**.
-3. Push. The included workflow builds and deploys automatically.
-4. Add the deployed URL to Supabase's allowed authentication redirect URLs.
-
-The app will be available at `https://<username>.github.io/<repo>/`.
-
-## 4. Install on both phones
-
-Open the deployed URL in Safari, tap **Share → Add to Home Screen**, and launch it. Each person signs in using their approved email and opens the magic link on that phone. The app then asks whose device it is; that identity stays only on the device.
-
-## Local development
+The checked-in [`src/config.js`](src/config.js) leaves Supabase blank and uses a solo-specific data ID. In that configuration the app works on one device without a sign-in screen.
 
 ```bash
 npm install
 npm run dev
 ```
 
-Run the scoring-model tests and production build with:
+Run the test suite and production build with:
 
 ```bash
 npm test
 npm run build
 ```
 
-## Sync model
+## Optional Supabase sync
 
-Shared data remains one JSON document for simple deployment, but local edits are stored as small operations rather than whole-state replacements. Every save includes the server revision it was based on:
+Create a Supabase project, enable email authentication, and add the final deployed URL (plus the local Vite URL for development) to the allowed redirect URLs.
 
-1. The phone queues and immediately displays the local operation.
-2. It loads the newest household row.
-3. It replays queued operations over that row.
-4. It saves only if the server revision is unchanged.
-5. If another phone saved first, it reloads and repeats.
+Before running [`supabase-schema.sql`](supabase-schema.sql), replace:
 
-The operation queue lives in local storage until Supabase confirms the write, so a network failure or app reload does not discard unsynced changes. Polling runs every 20 seconds and whenever the app returns to the foreground.
+- `REPLACE_WITH_YOUR_SOLO_DATA_ID` with a long random ID used only by this solo app
+- `owner@example.com` with the owner's email
 
-Simulation time never enters shared data. While fast-forwarded, edits (popping bubbles, cleaning-service resets, pauses) apply to a local sandbox copy that is discarded on returning to today, so testing never touches the shared household. Chore and settings changes stay disabled in simulation. All real, persisted events use the device's real clock.
+Then copy the project URL, anon key, and the same solo data ID into `src/config.js`:
 
-Effort points use each person's last seven active days. The configured full-bar scale is divided into supportive zones: Getting started below 40%, Maintaining from 40%, and On top of it! from 80% onward. Exact points remain visible, but the household goal is simply to keep each individual tally in the green top zone. The neutral Together bar shows combined activity without masking either person's zone.
+```js
+export const SUPABASE_URL = "https://xxxx.supabase.co";
+export const SUPABASE_ANON_KEY = "eyJ...";
+export const HOUSEHOLD_ID = "the-solo-data-id-used-in-the-sql-file";
+```
 
-Household pauses freeze both tallies, solo pauses freeze only that person's tally, and overlapping pauses are counted once. A joint chore awards its full effort value to both people; cleaning-service and board-reset events award no effort. Gap suggestions, previous-period recaps, and shared streaks all use the start of the top (On top of it!) zone rather than requiring a completely full bar.
+The URL and anon key are public client credentials. Security comes from Supabase authentication and row-level policies; knowing the data ID does not grant access.
+
+## Deployment and installation
+
+1. Create a new GitHub repository for this solo app and push it to `main`.
+2. In **Settings → Pages**, choose **GitHub Actions** as the source.
+3. Add the deployed URL to Supabase's authentication redirects if sync is enabled.
+4. Open the deployed URL in Safari and use **Share → Add to Home Screen**.
+
+The PWA installs as **CB Solo**, independently from the shared ChoreBubbles app.
+
+## Data behavior
+
+New completions are stored with the single `owner` identity. If data from the shared app is deliberately imported, legacy `a`, `b`, and `joint` completions remain readable and each counts once toward the owner's history and tally. Service and board-reset events award no effort.
+
+The operation queue remains in local storage until a configured Supabase backend confirms each write. Saves use optimistic row revisions, so the same owner can safely use more than one device.
+
+Simulation time never enters saved data. While fast-forwarded, completions and pauses apply only to a local sandbox that is discarded on returning to today.

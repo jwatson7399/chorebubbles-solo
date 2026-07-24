@@ -11,16 +11,14 @@ import {
   sendMagicLink,
   verifyEmailOtp,
   signOut,
-  getMe as loadMe,
-  setMe as saveMe,
   isSynced,
 } from "./storage.js";
 import {
-  bothStreak,
   effortZone,
   effortZoneThresholds,
   pausedDuration,
   pointsInActivePeriod,
+  soloStreak,
   suggestCombo,
   weeklyPoints,
 } from "./logModel.js";
@@ -41,7 +39,7 @@ import {
   updateTwoStep,
 } from "./twoStepChore.js";
 
-// ChoreBubbles: a shared household chore ecosystem.
+// ChoreBubbles Solo: a personal chore ecosystem.
 // Bubbles swell as chores go undone. Tap to complete, drag to rearrange.
 
 
@@ -76,7 +74,7 @@ const STARTERS = [
 
 const uid = () => Math.random().toString(36).slice(2, 10);
 const DAY = 86400000;
-const INTRO_KEY = "chorebubbles:seenIntro:v1";
+const INTRO_KEY = "chorebubbles-solo:seenIntro:v1";
 const realNow = () => Date.now();
 // Simulation support: shifts the app's sense of "now" forward for testing
 let TIME_OFFSET = 0;
@@ -86,7 +84,7 @@ const defaultData = () => ({
   chores: [],
   completions: [],
   pauses: [],
-  settings: { nameA: "Julian", nameB: "Kristine", weeklyGoal: 14 },
+  settings: { mode: "solo", ownerName: "You", weeklyGoal: 14 },
   updatedAt: 0,
 });
 
@@ -99,13 +97,20 @@ function normalizeData(value) {
     chores: Array.isArray(source.chores) ? source.chores : [],
     completions: Array.isArray(source.completions) ? source.completions : [],
     pauses: Array.isArray(source.pauses) ? source.pauses : [],
-    settings: { ...defaults.settings, ...(source.settings || {}) },
+    settings: {
+      ...defaults.settings,
+      ...(source.settings || {}),
+      mode: "solo",
+      ownerName:
+        source.settings?.ownerName ||
+        source.settings?.nameA ||
+        defaults.settings.ownerName,
+    },
   };
 }
 
-// Operations are intentionally small and replayable. When two phones edit at
-// once, each operation is applied to the newest server state instead of either
-// phone replacing the other phone's entire snapshot.
+// Operations are intentionally small and replayable so offline changes can be
+// applied safely to the newest saved state.
 function applyOperation(value, op) {
   const data = normalizeData(value);
   let next = data;
@@ -747,8 +752,6 @@ export default function ChoreBubbles() {
   const [authCode, setAuthCode] = useState("");
   const [authError, setAuthError] = useState("");
   const [data, setData] = useState(null);
-  const [me, setMe] = useState(null);
-  const [askWho, setAskWho] = useState(false);
   const [tab, setTab] = useState("bubbles");
   const [tapChore, setTapChore] = useState(null);
   const [tapWhenDays, setTapWhenDays] = useState(0);
@@ -778,7 +781,7 @@ export default function ChoreBubbles() {
 
   // While the time machine is running, edits (popping bubbles, service, pauses)
   // apply to a local sandbox copy that is never synced and is discarded on
-  // returning to today. This keeps simulated play out of the shared household.
+  // returning to today. This keeps simulated play out of saved data.
   const view = simDays > 0 && simData ? simData : data;
 
   const logStats = useMemo(() => {
@@ -786,24 +789,16 @@ export default function ChoreBubbles() {
     const at = now();
     const pauses = view.pauses || [];
     const goal = Number(view.settings?.weeklyGoal) || 14;
-    const housePaused = !!activePause(pauses, "house");
-    const soloAPaused = !!activePause(pauses, "a");
-    const soloBPaused = !!activePause(pauses, "b");
-    const aPaused = housePaused || soloAPaused;
-    const bPaused = housePaused || soloBPaused;
-    const pointsA = weeklyPoints(view.completions, "a", pauses, at);
-    const pointsB = weeklyPoints(view.completions, "b", pauses, at);
+    const paused = !!activePause(pauses, "house");
+    const points = weeklyPoints(view.completions, "owner", pauses, at);
     const { greenMin } = effortZoneThresholds(goal, view.settings?.greenStart);
-    const previousA = pointsInActivePeriod(view.completions, "a", pauses, at, 1);
-    const previousB = pointsInActivePeriod(view.completions, "b", pauses, at, 1);
-    const streak = bothStreak(view.completions, greenMin, pauses, at);
+    const previousPoints = pointsInActivePeriod(view.completions, "owner", pauses, at, 1);
+    const streak = soloStreak(view.completions, greenMin, pauses, at);
     const urgencyById = Object.fromEntries(
       view.chores.map((chore) => [chore.id, urgencyOf(chore, view.completions, pauses)])
     );
-    const myPoints = me === "b" ? pointsB : pointsA;
-    const myPaused = me === "b" ? bPaused : aPaused;
-    const gap = Math.max(0, greenMin - myPoints);
-    const suggestion = me && !myPaused && gap > 0
+    const gap = Math.max(0, greenMin - points);
+    const suggestion = !paused && gap > 0
       ? suggestCombo(view.chores, gap, urgencyById, suggestionSeed)
       : null;
 
@@ -811,22 +806,15 @@ export default function ChoreBubbles() {
       pauses,
       goal,
       greenMin,
-      housePaused,
-      soloAPaused,
-      soloBPaused,
-      aPaused,
-      bPaused,
-      pointsA,
-      pointsB,
-      previousA,
-      previousB,
-      previousHasActivity: previousA + previousB > 0,
+      paused,
+      points,
+      previousPoints,
+      previousHasActivity: previousPoints > 0,
       streak,
-      myPaused,
       gap,
       suggestion,
     };
-  }, [view, me, suggestionSeed, simDays]);
+  }, [view, suggestionSeed, simDays]);
 
   const showToast = useCallback((msg, undoFn = null) => {
     if (toastTimer.current) clearTimeout(toastTimer.current);
@@ -881,7 +869,7 @@ export default function ChoreBubbles() {
           const visible = remaining.reduce(applyOperation, normalizeData(saved.value));
           setData(visible);
         }
-        throw new Error("The household changed repeatedly while saving.");
+        throw new Error("Your data changed repeatedly while saving.");
       } catch (error) {
         setSyncState(isSynced() ? "offline — changes queued" : "saved locally");
         return false;
@@ -905,27 +893,22 @@ export default function ChoreBubbles() {
       setSyncState("");
       if (pending.length > 0) flushQueue();
     } catch (error) {
-      setSyncState(error.message || "Unable to load this household.");
+      setSyncState(error.message || "Unable to load your chores.");
       if (!isSynced() && !dataRef.current) setData(defaultData());
     }
   }, [flushQueue]);
 
   useEffect(() => {
     if (!authReady || (isSynced() && !session)) return;
-    (async () => {
-      await load();
-      const saved = loadMe();
-      if (saved) setMe(saved);
-      else setAskWho(true);
-    })();
+    load();
   }, [authReady, session, load]);
 
   useEffect(() => {
-    if (!data || !me || askWho || simDays > 0) return;
+    if (!data || simDays > 0) return;
     try {
       if (!localStorage.getItem(INTRO_KEY)) setIntroOpen(true);
     } catch {}
-  }, [data, me, askWho, simDays]);
+  }, [data, simDays]);
 
   useEffect(() => {
     if (!authReady || (isSynced() && !session)) return;
@@ -978,12 +961,6 @@ export default function ChoreBubbles() {
     }
   };
 
-  const chooseMe = async (who) => {
-    setMe(who);
-    setAskWho(false);
-    try { saveMe(who); } catch {}
-  };
-
   const dismissIntro = () => {
     try { localStorage.setItem(INTRO_KEY, "1"); } catch {}
     setIntroOpen(false);
@@ -1018,7 +995,7 @@ export default function ChoreBubbles() {
     commit({ type: "pause:set", scope, active: !active, at: now(), pauseId: uid() });
   };
 
-  const logCompletion = (chore, by) => {
+  const logCompletion = (chore) => {
     // "when" lets you backdate a chore you forgot to log (e.g. done yesterday).
     const ts = now() - tapWhenDays * DAY;
     const twoStep = isTwoStepChore(chore);
@@ -1027,7 +1004,7 @@ export default function ChoreBubbles() {
       choreId: chore.id,
       choreName: chore.name,
       difficulty: chore.difficulty,
-      by,
+      by: "owner",
       ts,
       ...(twoStep ? { twoStepIndex: chore.twoStep.active } : {}),
     };
@@ -1040,10 +1017,9 @@ export default function ChoreBubbles() {
     setPopId(chore.id);
     if (popTimer.current) clearTimeout(popTimer.current);
     popTimer.current = setTimeout(() => setPopId(null), 1000);
-    const who = by === "joint" ? "together" : by === "a" ? view.settings.nameA : view.settings.nameB;
     const when = tapWhenDays === 0 ? "" : tapWhenDays === 1 ? " (yesterday)" : ` (${tapWhenDays}d ago)`;
     const nextStep = twoStep ? advanceTwoStepChore(chore).name : "";
-    showToast(`${chore.name} done ${by === "joint" ? "" : "by "}${who}${when}${nextStep ? ` · ${nextStep} is up next` : ""}`, () => {
+    showToast(`${chore.name} done${when}${nextStep ? ` · ${nextStep} is up next` : ""}`, () => {
       commit(twoStep
         ? { type: "completion:remove-and-restore", ids: [comp.id], chore }
         : { type: "completion:remove", ids: [comp.id] });
@@ -1126,8 +1102,8 @@ export default function ChoreBubbles() {
     return (
       <div style={{ minHeight: "100dvh", display: "flex", alignItems: "center", justifyContent: "center", background: "radial-gradient(120% 100% at 50% 0%, #123240 0%, #0C1B26 70%)", color: "#E8F3F4", fontFamily: "'Nunito Sans', sans-serif", padding: 24 }}>
         <div style={{ width: "100%", maxWidth: 420, background: "#16303C", border: "1px solid #1E4152", borderRadius: 22, padding: 24 }}>
-          <div style={{ fontFamily: "'Baloo 2', sans-serif", fontSize: 26, fontWeight: 700, marginBottom: 4 }}>Chore<span style={{ color: "#5FE0BB" }}>Bubbles</span></div>
-          <div style={{ color: "#B9D2D8", fontSize: 14, marginBottom: 18 }}>Sign in with an approved household email. We’ll email you a 6-digit code to enter below.</div>
+          <div style={{ fontFamily: "'Baloo 2', sans-serif", fontSize: 26, fontWeight: 700, marginBottom: 4 }}>Chore<span style={{ color: "#5FE0BB" }}>Bubbles</span> <span style={{ color: "#9FD4EA", fontSize: 16 }}>Solo</span></div>
+          <div style={{ color: "#B9D2D8", fontSize: 14, marginBottom: 18 }}>Sign in with your approved email. We’ll email you a 6-digit code to enter below.</div>
           <input
             type="email"
             autoComplete="email"
@@ -1167,7 +1143,7 @@ export default function ChoreBubbles() {
   if (!data) {
     return (
       <div style={{ height: "100dvh", display: "flex", flexDirection: "column", gap: 10, alignItems: "center", justifyContent: "center", textAlign: "center", padding: 28, background: "#0C1B26", color: "#7FA3AC", fontFamily: "'Nunito Sans', sans-serif" }}>
-        <div>Loading your household...</div>
+        <div>Loading your chores...</div>
         {syncState && <div style={{ color: "#FF8B7B", fontSize: 13, maxWidth: 380 }}>{syncState}</div>}
       </div>
     );
@@ -1178,18 +1154,11 @@ export default function ChoreBubbles() {
     pauses,
     goal,
     greenMin,
-    housePaused,
-    soloAPaused,
-    soloBPaused,
-    aPaused,
-    bPaused,
-    pointsA,
-    pointsB,
-    previousA,
-    previousB,
+    paused,
+    points,
+    previousPoints,
     previousHasActivity,
     streak,
-    myPaused,
     gap,
     suggestion,
   } = logStats;
@@ -1204,24 +1173,18 @@ export default function ChoreBubbles() {
   const suggestedBubbleIds = new Set(
     bubbleSuggestionsVisible && suggestion ? suggestion.chores.map((chore) => chore.id) : []
   );
-  const canShuffleSuggestions = !!suggestion && !myPaused && view.chores.length > 0;
+  const canShuffleSuggestions = !!suggestion && !paused && view.chores.length > 0;
   const shuffleSuggestions = () => {
     if (!canShuffleSuggestions) return;
     setBubbleSuggestionsVisible(true);
     setSuggestionSeed((seed) => seed + 1);
   };
   const hideBubbleSuggestions = () => setBubbleSuggestionsVisible(false);
-  const togetherPoints = pointsA + pointsB;
-  const togetherGoal = goal * 2;
   const previousRecap = !previousHasActivity
     ? ""
-    : previousA >= greenMin && previousB >= greenMin
-    ? "Previous 7 days: both stayed green 🌱"
-    : previousA >= greenMin
-    ? `Previous 7 days: ${settings.nameA} was green`
-    : previousB >= greenMin
-    ? `Previous 7 days: ${settings.nameB} was green`
-    : `Previous 7 days: ${previousA + previousB} points together`;
+    : previousPoints >= greenMin
+    ? "Previous 7 days: you stayed green 🌱"
+    : `Previous 7 days: ${previousPoints} points`;
 
   const impLabel = (v) => ["", "Low", "Mild", "Medium", "High", "Critical"][v];
 
@@ -1244,17 +1207,15 @@ export default function ChoreBubbles() {
       {/* Header */}
       <div style={{ padding: "calc(env(safe-area-inset-top) + 14px) 20px 8px", display: "flex", alignItems: "center", justifyContent: "space-between" }}>
         <div style={{ fontFamily: "'Baloo 2', sans-serif", fontSize: 22, fontWeight: 700, letterSpacing: 0.3 }}>
-          Chore<span style={{ color: "#5FE0BB" }}>Bubbles</span>
+          Chore<span style={{ color: "#5FE0BB" }}>Bubbles</span> <span style={{ color: "#9FD4EA", fontSize: 13 }}>Solo</span>
         </div>
         <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-          <div style={{ fontSize: 12, color: simDays > 0 ? "#FFC65E" : housePaused || aPaused || bPaused ? "#6FC3FF" : "#7FA3AC", fontWeight: simDays > 0 || housePaused ? 700 : 400 }}>
+          <div style={{ fontSize: 12, color: simDays > 0 ? "#FFC65E" : paused ? "#6FC3FF" : "#7FA3AC", fontWeight: simDays > 0 || paused ? 700 : 400 }}>
             {simDays > 0
               ? `⏩ +${simDays}d`
-              : housePaused
+              : paused
               ? "🏖 paused"
-              : aPaused || bPaused
-              ? `🏖 ${[aPaused && settings.nameA, bPaused && settings.nameB].filter(Boolean).join(" + ")}`
-              : syncState || (!isSynced() ? "local only" : me ? (me === "a" ? settings.nameA : settings.nameB) : "")}
+              : syncState || (!isSynced() ? "local only" : settings.ownerName)}
           </div>
           <button onClick={() => setSimOpen(true)} style={{ background: "none", border: "none", fontSize: 17, cursor: "pointer", padding: 2, WebkitTapHighlightColor: "transparent", opacity: 0.75 }}>
             🧪
@@ -1262,7 +1223,7 @@ export default function ChoreBubbles() {
         </div>
       </div>
 
-      {/* Our home's health bar */}
+      {/* Home health bar */}
       {view.chores.length > 0 && (
         <div style={{ padding: "2px 20px 10px" }}>
           <div style={{ textAlign: "center", marginBottom: 2 }}>
@@ -1279,7 +1240,7 @@ export default function ChoreBubbles() {
             </span>
           </div>
           <div style={{ display: "flex", alignItems: "baseline", justifyContent: "space-between", marginBottom: 5 }}>
-            <span style={{ fontFamily: "'Baloo 2', sans-serif", fontSize: 13, fontWeight: 600, color: "#B9D2D8", letterSpacing: 0.4 }}>Our home's health</span>
+            <span style={{ fontFamily: "'Baloo 2', sans-serif", fontSize: 13, fontWeight: 600, color: "#B9D2D8", letterSpacing: 0.4 }}>My home&apos;s health</span>
             <span style={{ fontSize: 13, fontWeight: 700, color: healthPulse ? "#5FE0BB" : healthColor, transition: "color 0.5s ease" }}>
               {healthPct}%
             </span>
@@ -1314,19 +1275,18 @@ export default function ChoreBubbles() {
       {tab === "bubbles" && (
         <div style={{ flex: 1, display: "flex", flexDirection: "column", minHeight: 0 }}>
           {view.chores.length > 0 && (
-            <div style={{ display: "flex", gap: 16, alignItems: "flex-end", padding: "2px 20px 8px" }}>
-              <CompactBar name={settings.nameA} points={pointsA} goal={goal} greenStart={settings.greenStart} paused={aPaused} />
-              <CompactBar name={settings.nameB} points={pointsB} goal={goal} greenStart={settings.greenStart} paused={bPaused} />
+            <div style={{ padding: "2px 20px 8px" }}>
+              <CompactBar name={settings.ownerName} points={points} goal={goal} greenStart={settings.greenStart} paused={paused} />
             </div>
           )}
           {simDays > 0 && (
             <div style={{ margin: "4px 20px 0", padding: "9px 14px", background: "#3B3215", border: "1px solid #6E5C21", borderRadius: 12, fontSize: 13, color: "#FFC65E", textAlign: "center" }}>
-              🧪 Time machine — tap bubbles to test. Nothing here is saved or shared.
+              🧪 Time machine — tap bubbles to test. Nothing here is saved.
             </div>
           )}
-          {housePaused && (
+          {paused && (
             <div style={{ margin: "4px 20px 0", padding: "9px 14px", background: "#12384A", border: "1px solid #1E5A73", borderRadius: 12, fontSize: 13, color: "#9FD4EA", textAlign: "center" }}>
-              🏖 Household paused. Bubbles are frozen until you resume.
+              🏖 Paused. Bubble growth and your tally are frozen until you resume.
             </div>
           )}
           <BubbleField chores={view.chores} completions={view.completions} pauses={pauses} onTap={(ch) => { setTapWhenDays(0); setTapChore(ch); }} popId={popId} simDays={simDays} suggestedIds={suggestedBubbleIds} />
@@ -1367,11 +1327,14 @@ export default function ChoreBubbles() {
         <div style={{ flex: 1, overflowY: "auto", padding: "8px 20px 26px" }}>
           <div style={{ fontFamily: "'Baloo 2', sans-serif", fontSize: 23, fontWeight: 700, marginTop: 4 }}>Last 7 days</div>
           <div style={{ color: "#7FA3AC", fontSize: 13, lineHeight: 1.4, marginBottom: 12 }}>
-            What you&apos;ve each done over your last 7 active days. Keep it in the green.
+            What you&apos;ve done over your last 7 active days. Keep it in the green.
           </div>
 
           <div style={{ background: "linear-gradient(145deg, #173746, #122B37)", border: "1px solid #245064", borderRadius: 18, padding: "0 16px 12px", marginBottom: 12 }}>
-            <ProgressRow label="Together 🤝" points={togetherPoints} goal={togetherGoal} hue="#5FE0BB" prominent />
+            <ProgressRow label={settings.ownerName} points={points} goal={goal} hue="#5FE0BB" paused={paused} zoned greenStart={settings.greenStart} prominent />
+            <div style={{ color: "#7FA3AC", fontSize: 11.5, textAlign: "center", padding: "2px 0 10px" }}>
+              Full scale: {goal} points · Green starts at {greenMin}
+            </div>
             {(previousRecap || streak >= 2) && (
               <div style={{ color: "#9FBCC4", fontSize: 12, lineHeight: 1.45, borderTop: "1px solid #244653", paddingTop: 10 }}>
                 {previousRecap}
@@ -1381,21 +1344,12 @@ export default function ChoreBubbles() {
             )}
           </div>
 
-          <div style={{ background: "#102733", border: "1px solid #1A3B49", borderRadius: 18, padding: "2px 16px", marginBottom: 12 }}>
-            <ProgressRow label={settings.nameA} points={pointsA} goal={goal} hue="#6FC3FF" paused={aPaused} zoned greenStart={settings.greenStart} />
-            <div style={{ height: 1, background: "#1A3B49" }} />
-            <ProgressRow label={settings.nameB} points={pointsB} goal={goal} hue="#FF9FC0" paused={bPaused} zoned greenStart={settings.greenStart} />
-            <div style={{ color: "#7FA3AC", fontSize: 11.5, textAlign: "center", padding: "2px 0 12px" }}>
-              Full scale: {goal} points · Green starts at {greenMin}
-            </div>
-          </div>
-
-          {me && !myPaused && (
+          {!paused && (
             <div style={{ background: gap === 0 ? "#153D35" : "#2B2A19", border: `1px solid ${gap === 0 ? "#297261" : "#5B5327"}`, borderRadius: 18, padding: 16, marginBottom: 16 }}>
               {gap === 0 ? (
                 <>
                   <div style={{ fontFamily: "'Baloo 2', sans-serif", fontSize: 17, fontWeight: 700, color: "#5FE0BB" }}>Your tally is in the green! 🌱</div>
-                  <div style={{ fontSize: 12, color: "#A8CFC5", marginTop: 3 }}>Nice work keeping the household moving.</div>
+                  <div style={{ fontSize: 12, color: "#A8CFC5", marginTop: 3 }}>Nice work keeping your routine moving.</div>
                 </>
               ) : (
                 <>
@@ -1428,8 +1382,7 @@ export default function ChoreBubbles() {
           )}
 
           <div style={{ color: "#7FA3AC", fontSize: 11.5, lineHeight: 1.45, textAlign: "center", margin: "2px 4px 20px" }}>
-            Chores you do together count full for both of you.<br />
-            Vacation mode freezes your tally while you&apos;re away.
+            Vacation mode freezes bubble growth and your tally while you&apos;re away.
           </div>
 
           <div style={{ fontFamily: "'Baloo 2', sans-serif", fontSize: 17, fontWeight: 700, marginBottom: 8 }}>Recent activity</div>
@@ -1441,11 +1394,11 @@ export default function ChoreBubbles() {
                   {c.by === "service" ? "🧹 " : c.by === "reset" ? "🔄 " : ""}{c.choreName}
                 </div>
                 <div style={{ fontSize: 12, color: "#7FA3AC" }}>
-                  {c.by === "a" ? settings.nameA : c.by === "b" ? settings.nameB : c.by === "joint" ? "Together" : c.by === "reset" ? "Caught up" : "Cleaning service"} · {timeAgo(c.ts)}
+                  {completionActor(c, settings)} · {timeAgo(c.ts)}
                 </div>
               </div>
               <div style={{ fontSize: 13, color: c.by === "service" || c.by === "reset" ? "#7FA3AC" : "#5FE0BB", fontWeight: 700, whiteSpace: "nowrap" }}>
-                {c.by === "service" || c.by === "reset" ? "reset" : `+${c.difficulty}${c.by === "joint" ? " each" : ""}`}
+                {completionImpact(c, settings)}
               </div>
               <button
                 onClick={() => removeCompletion(c)}
@@ -1524,12 +1477,12 @@ export default function ChoreBubbles() {
             <>
               <div style={{ marginTop: 26, fontFamily: "'Baloo 2', sans-serif", fontSize: 16, fontWeight: 600 }}>Board maintenance</div>
               <div style={{ fontSize: 12, color: "#7FA3AC", margin: "4px 0 10px" }}>
-                Reset marks every chore as just done (no points) — handy if you were away without pausing. Clear removes all chores so you can build a fresh list together.
+                Reset marks every chore as just done (no points) — handy if you were away without pausing. Clear removes all chores so you can build a fresh list.
               </div>
               <button disabled={simDays > 0} onClick={() => window.confirm("Reset all bubbles to fresh? Every chore is marked as just done — no points are awarded.") && resetBubbles()} style={{ ...btnStyle("#0F2530", "#5FE0BB"), width: "100%", marginBottom: 8, border: "1px solid #1E4152", opacity: simDays > 0 ? 0.45 : 1 }}>
                 🔄 Reset all bubbles to fresh
               </button>
-              <button disabled={simDays > 0} onClick={() => window.confirm("Clear all chores for both of you? This removes every chore and cannot be undone.") && clearChores()} style={{ ...btnStyle("#0F2530", "#FF8B7B"), width: "100%", border: "1px solid #1E4152", opacity: simDays > 0 ? 0.45 : 1 }}>
+              <button disabled={simDays > 0} onClick={() => window.confirm("Clear all chores? This removes every chore and cannot be undone.") && clearChores()} style={{ ...btnStyle("#0F2530", "#FF8B7B"), width: "100%", border: "1px solid #1E4152", opacity: simDays > 0 ? 0.45 : 1 }}>
                 🗑 Clear all chores
               </button>
             </>
@@ -1537,32 +1490,21 @@ export default function ChoreBubbles() {
 
           <div style={{ marginTop: 26, fontFamily: "'Baloo 2', sans-serif", fontSize: 16, fontWeight: 600 }}>Vacation mode</div>
           <div style={{ fontSize: 12, color: "#7FA3AC", margin: "4px 0 10px" }}>
-            Household pause freezes all bubble growth and both tallies. A solo pause protects one person&apos;s tally during a trip or a rough week while bubbles keep growing for whoever is home.
+            Pause freezes bubble growth and your rolling tally during a trip or a rough week.
           </div>
-          <button onClick={() => togglePause("house")} style={{ ...btnStyle(housePaused ? "#6FC3FF" : "#0F2530", housePaused ? "#0C1B26" : "#9FD4EA"), width: "100%", marginBottom: 8, border: housePaused ? "none" : "1px solid #1E4152" }}>
-            {housePaused ? "🏖 Resume household" : "🏖 Pause whole household"}
+          <button onClick={() => togglePause("house")} style={{ ...btnStyle(paused ? "#6FC3FF" : "#0F2530", paused ? "#0C1B26" : "#9FD4EA"), width: "100%", marginBottom: 8, border: paused ? "none" : "1px solid #1E4152" }}>
+            {paused ? "🏖 Resume" : "🏖 Pause while away"}
           </button>
-          <div style={{ display: "flex", gap: 8 }}>
-            <button onClick={() => togglePause("a")} style={{ ...btnStyle(soloAPaused ? "#6FC3FF" : "#0F2530", soloAPaused ? "#0C1B26" : "#B9D2D8"), flex: 1, fontSize: 13, border: soloAPaused ? "none" : "1px solid #1E4152" }}>
-              {soloAPaused ? `Resume ${settings.nameA}` : `Pause ${settings.nameA}`}
-            </button>
-            <button onClick={() => togglePause("b")} style={{ ...btnStyle(soloBPaused ? "#6FC3FF" : "#0F2530", soloBPaused ? "#0C1B26" : "#B9D2D8"), flex: 1, fontSize: 13, border: soloBPaused ? "none" : "1px solid #1E4152" }}>
-              {soloBPaused ? `Resume ${settings.nameB}` : `Pause ${settings.nameB}`}
-            </button>
-          </div>
 
-          <div style={{ marginTop: 26, fontFamily: "'Baloo 2', sans-serif", fontSize: 16, fontWeight: 600 }}>Household settings</div>
+          <div style={{ marginTop: 26, fontFamily: "'Baloo 2', sans-serif", fontSize: 16, fontWeight: 600 }}>Solo settings</div>
           <Stepper label="Effort scale (full bar)" value={settings.weeklyGoal} min={4} max={40} onChange={(v) => commit({ type: "settings:patch", patch: { weeklyGoal: v, greenStart: Math.min(greenMin, v) } })} />
           <Stepper label="Green zone starts at" value={greenMin} min={2} max={settings.weeklyGoal} onChange={(v) => commit({ type: "settings:patch", patch: { greenStart: v } })} format={(v) => `${v} pts`} />
           <div style={{ color: "#7FA3AC", fontSize: 11.5, margin: "-4px 0 8px" }}>
             Land in the green by reaching {greenMin} of {settings.weeklyGoal} points. The full bar is a reference, not a cutoff.
           </div>
-          <NameEditor settings={settings} onSave={(nameA, nameB) => commit({ type: "settings:patch", patch: { nameA, nameB } })} />
-          <button onClick={() => setAskWho(true)} style={{ ...btnStyle("#0F2530", "#B9D2D8"), width: "100%", marginTop: 12, border: "1px solid #1E4152", fontSize: 13 }}>
-            This phone belongs to: {me === "a" ? settings.nameA : me === "b" ? settings.nameB : "?"} (change)
-          </button>
-          <button onClick={() => window.confirm("Clear the shared activity log? This cannot be undone.") && resetActivity()} style={{ ...btnStyle("#0F2530", "#FF8B7B"), width: "100%", marginTop: 8, border: "1px solid #1E4152", fontSize: 13 }}>
-            Clear shared activity log
+          <OwnerNameEditor settings={settings} onSave={(ownerName) => commit({ type: "settings:patch", patch: { ownerName } })} />
+          <button onClick={() => window.confirm("Clear the activity log? This cannot be undone.") && resetActivity()} style={{ ...btnStyle("#0F2530", "#FF8B7B"), width: "100%", marginTop: 8, border: "1px solid #1E4152", fontSize: 13 }}>
+            Clear activity log
           </button>
           {isSynced() && (
             <button onClick={() => signOut().catch((error) => showToast(error.message || "Could not sign out."))} style={{ ...btnStyle("#0F2530", "#B9D2D8"), width: "100%", marginTop: 8, border: "1px solid #1E4152", fontSize: 13 }}>
@@ -1617,19 +1559,8 @@ export default function ChoreBubbles() {
         </Modal>
       )}
 
-      {/* Who are you */}
-      {askWho && (
-        <Modal onClose={() => me && setAskWho(false)}>
-          <div style={{ fontFamily: "'Baloo 2', sans-serif", fontSize: 19, fontWeight: 700, marginBottom: 16 }}>Whose phone is this?</div>
-          <div style={{ display: "flex", gap: 10 }}>
-            <button onClick={() => chooseMe("a")} style={{ ...btnStyle("#6FC3FF"), flex: 1 }}>{settings.nameA}</button>
-            <button onClick={() => chooseMe("b")} style={{ ...btnStyle("#FF9FC0"), flex: 1 }}>{settings.nameB}</button>
-          </div>
-        </Modal>
-      )}
-
-      {/* One-time explanation, shown only after device identity is known */}
-      {introOpen && !askWho && (
+      {/* One-time explanation */}
+      {introOpen && (
         <Modal onClose={dismissIntro}>
           <div style={{ fontFamily: "'Baloo 2', sans-serif", fontSize: 21, fontWeight: 700, marginBottom: 14 }}>How ChoreBubbles works 🫧</div>
           <div style={{ display: "flex", flexDirection: "column", gap: 12, color: "#D7E7EA", fontSize: 14, lineHeight: 1.45, marginBottom: 20 }}>
@@ -1660,17 +1591,9 @@ export default function ChoreBubbles() {
               </button>
             ))}
           </div>
-          <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
-            <button onClick={() => logCompletion(tapChore, me || "a")} style={btnStyle("#5FE0BB")}>
-              Done by me ({me === "b" ? settings.nameB : settings.nameA})
-            </button>
-            <button onClick={() => logCompletion(tapChore, me === "b" ? "a" : "b")} style={btnStyle("#0F2530", "#E8F3F4")}>
-              Done by {me === "b" ? settings.nameA : settings.nameB}
-            </button>
-            <button onClick={() => logCompletion(tapChore, "joint")} style={btnStyle("#C7A5F7")}>
-              We did it together
-            </button>
-          </div>
+          <button onClick={() => logCompletion(tapChore)} style={{ ...btnStyle("#5FE0BB"), width: "100%" }}>
+            Mark done
+          </button>
         </Modal>
       )}
 
@@ -1678,7 +1601,7 @@ export default function ChoreBubbles() {
       {serviceOpen && (
         <Modal onClose={() => setServiceOpen(false)}>
           <div style={{ fontFamily: "'Baloo 2', sans-serif", fontSize: 19, fontWeight: 700, marginBottom: 4 }}>Cleaning service visit</div>
-          <div style={{ fontSize: 13, color: "#7FA3AC", marginBottom: 14 }}>Check off what they handled. These bubbles reset without crediting either tally.</div>
+          <div style={{ fontSize: 13, color: "#7FA3AC", marginBottom: 14 }}>Check off what they handled. These bubbles reset without crediting your tally.</div>
           <div style={{ maxHeight: 300, overflowY: "auto", marginBottom: 16 }}>
             {view.chores.map((ch) => (
               <label key={ch.id} style={{ display: "flex", alignItems: "center", gap: 12, padding: "9px 0", borderBottom: "1px solid #1A3542", cursor: "pointer" }}>
@@ -1745,7 +1668,7 @@ export default function ChoreBubbles() {
               </div>
               {editChoreHistory.length === 0 ? (
                 <div style={{ background: "#102733", border: "1px solid #1A3B49", borderRadius: 12, padding: "12px 14px", color: "#7FA3AC", fontSize: 13 }}>
-                  No one has logged this chore yet.
+                  No completions logged yet.
                 </div>
               ) : (
                 <div style={{ maxHeight: 220, overflowY: "auto", background: "#102733", border: "1px solid #1A3B49", borderRadius: 12, padding: "0 12px" }}>
@@ -1762,7 +1685,7 @@ export default function ChoreBubbles() {
                           </div>
                         </div>
                         <div style={{ color: resetEntry ? "#9FB6BC" : "#5FE0BB", fontSize: 12.5, fontWeight: 800, whiteSpace: "nowrap" }}>
-                          {completionImpact(entry)}
+                          {completionImpact(entry, settings)}
                         </div>
                       </div>
                     );
@@ -1799,19 +1722,21 @@ export default function ChoreBubbles() {
   );
 }
 
-// Name fields buffer locally and save on blur so typing does not spam storage writes
-function NameEditor({ settings, onSave }) {
-  const [a, setA] = useState(settings.nameA);
-  const [b, setB] = useState(settings.nameB);
-  useEffect(() => { setA(settings.nameA); setB(settings.nameB); }, [settings.nameA, settings.nameB]);
+// The owner name buffers locally and saves on blur so typing does not spam writes.
+function OwnerNameEditor({ settings, onSave }) {
+  const [ownerName, setOwnerName] = useState(settings.ownerName);
+  useEffect(() => { setOwnerName(settings.ownerName); }, [settings.ownerName]);
   const commit = () => {
-    if (a.trim() && b.trim() && (a !== settings.nameA || b !== settings.nameB)) onSave(a.trim(), b.trim());
+    if (ownerName.trim() && ownerName.trim() !== settings.ownerName) onSave(ownerName.trim());
   };
-  const inputStyle = { flex: 1, background: "#0F2530", border: "1px solid #1E4152", borderRadius: 12, padding: "10px 12px", color: "#E8F3F4", fontSize: 14, fontFamily: "inherit" };
   return (
-    <div style={{ display: "flex", gap: 10, marginTop: 8 }}>
-      <input value={a} onChange={(e) => setA(e.target.value)} onBlur={commit} style={inputStyle} />
-      <input value={b} onChange={(e) => setB(e.target.value)} onBlur={commit} style={inputStyle} />
-    </div>
+    <input
+      aria-label="Your name"
+      placeholder="Your name"
+      value={ownerName}
+      onChange={(event) => setOwnerName(event.target.value)}
+      onBlur={commit}
+      style={{ width: "100%", marginTop: 8, background: "#0F2530", border: "1px solid #1E4152", borderRadius: 12, padding: "10px 12px", color: "#E8F3F4", fontSize: 14, fontFamily: "inherit" }}
+    />
   );
 }

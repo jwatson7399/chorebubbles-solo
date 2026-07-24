@@ -1,14 +1,14 @@
 // ---------------------------------------------------------------
-// ChoreBubbles configuration
+// ChoreBubbles Solo configuration
 //
 // 1. Create a free project at https://supabase.com
 // 2. Edit and run supabase-schema.sql to create the secure table,
-//    allowed member emails, revision field, and RLS policies
+//    the owner's allowed email, revision field, and RLS policies
 // 3. Paste your Project URL and anon public key below
 //    (Settings -> API in the Supabase dashboard)
-// 4. Set HOUSEHOLD_ID to the same random ID used in the SQL file.
-//    This selects the household; access is granted by authenticated
-//    email membership, not by knowing this ID.
+// 4. Set HOUSEHOLD_ID to the same solo-only random ID used in SQL.
+//    It selects the owner's row; authenticated email access is what
+//    grants permission, not knowledge of this ID.
 //
 // Leave SUPABASE_URL empty to run in local-only mode: the app
 // works on one phone using browser storage, with no syncing.

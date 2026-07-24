@@ -70,6 +70,10 @@ export function effectiveAge(pauses, who, eventTime, at) {
 }
 
 function completionCredit(completion, who) {
+  if (who === "owner" && ["owner", "a", "b", "joint"].includes(completion.by)) {
+    const effort = Number(completion.difficulty);
+    return Number.isFinite(effort) && effort > 0 ? effort : 0;
+  }
   if (completion.by !== who && completion.by !== "joint") return 0;
   const effort = Number(completion.difficulty);
   return Number.isFinite(effort) && effort > 0 ? effort : 0;
@@ -116,6 +120,27 @@ export function bothStreak(completions, goal, pauses, at) {
     const a = pointsInActivePeriod(completions, "a", pauses, at, period);
     const b = pointsInActivePeriod(completions, "b", pauses, at, period);
     if (a < target || b < target) break;
+    streak++;
+  }
+  return streak;
+}
+
+export function soloStreak(completions, goal, pauses, at) {
+  const target = Number(goal);
+  if (!Number.isFinite(target) || target <= 0) return 0;
+
+  let oldestPeriod = 0;
+  for (const completion of completions || []) {
+    if (!["owner", "a", "b", "joint"].includes(completion.by)) continue;
+    const ts = Number(completion.ts);
+    if (!Number.isFinite(ts) || ts > at) continue;
+    const age = effectiveAge(pauses, "owner", ts, at);
+    if (age >= 0) oldestPeriod = Math.max(oldestPeriod, Math.floor(age / PERIOD));
+  }
+
+  let streak = 0;
+  for (let period = 1; period <= oldestPeriod; period++) {
+    if (pointsInActivePeriod(completions, "owner", pauses, at, period) < target) break;
     streak++;
   }
   return streak;

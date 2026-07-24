@@ -6,6 +6,7 @@ import {
   effortZone,
   effortZoneThresholds,
   pointsInActivePeriod,
+  soloStreak,
   suggestCombo,
   weeklyPoints,
 } from "./logModel.js";
@@ -28,6 +29,16 @@ describe("rolling effort points", () => {
     ];
     expect(weeklyPoints(completions, "a", [], AT)).toBe(5);
     expect(weeklyPoints(completions, "b", [], AT)).toBe(3);
+  });
+
+  it("counts new and inherited completion actors once for a solo owner", () => {
+    const completions = [
+      completion({ by: "owner", difficulty: 2 }),
+      completion({ by: "a", difficulty: 3 }),
+      completion({ by: "b", difficulty: 4 }),
+      completion({ by: "joint", difficulty: 5 }),
+    ];
+    expect(weeklyPoints(completions, "owner", [], AT)).toBe(14);
   });
 
   it("excludes service, reset, and future events", () => {
@@ -82,6 +93,15 @@ describe("rolling effort points", () => {
       completion({ by: "a", difficulty: 5, ts: AT - 22 * DAY }),
     ];
     expect(bothStreak(completions, 5, [], AT)).toBe(2);
+  });
+
+  it("counts consecutive completed solo periods across inherited actors", () => {
+    const completions = [
+      completion({ by: "owner", difficulty: 5, ts: AT - 8 * DAY }),
+      completion({ by: "joint", difficulty: 5, ts: AT - 15 * DAY }),
+      completion({ by: "a", difficulty: 3, ts: AT - 22 * DAY }),
+    ];
+    expect(soloStreak(completions, 5, [], AT)).toBe(2);
   });
 });
 

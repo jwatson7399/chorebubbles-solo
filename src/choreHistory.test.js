@@ -32,4 +32,14 @@ describe("chore history", () => {
     expect(completionImpact({ by: "service", difficulty: 3 })).toBe("reset");
     expect(completionImpact({ by: "joint", difficulty: 3 })).toBe("+3 each");
   });
+
+  it("folds inherited household actors into the solo owner", () => {
+    const solo = { mode: "solo", ownerName: "Julian" };
+    expect(completionActor({ by: "owner" }, solo)).toBe("Julian");
+    expect(completionActor({ by: "a" }, solo)).toBe("Julian");
+    expect(completionActor({ by: "b" }, solo)).toBe("Julian");
+    expect(completionActor({ by: "joint" }, solo)).toBe("Julian");
+    expect(lastDoneLabel({ by: "joint" }, solo)).toBe("Last done by Julian");
+    expect(completionImpact({ by: "joint", difficulty: 3 }, solo)).toBe("+3");
+  });
 });

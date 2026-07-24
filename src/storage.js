@@ -1,9 +1,8 @@
 import { createClient } from "@supabase/supabase-js";
 import { SUPABASE_URL, SUPABASE_ANON_KEY, HOUSEHOLD_ID } from "./config.js";
 
-// Shared state is kept in one row, but every save is conditional on the row's
-// revision. The app retries conflicts by replaying its queued operations over
-// the newest row, so edits from another phone are not silently overwritten.
+// The owner's state is kept in one row. Every save is conditional on its
+// revision so queued offline operations cannot silently overwrite newer data.
 
 const LOCAL_KEY = "chorebubbles:data:" + HOUSEHOLD_ID;
 const PENDING_KEY = "chorebubbles:pending:" + HOUSEHOLD_ID;
@@ -67,7 +66,7 @@ export async function getSharedRecord() {
     .eq("id", HOUSEHOLD_ID)
     .maybeSingle();
   if (error) throw error;
-  if (!data) throw new Error("This account is not a member of the configured household.");
+  if (!data) throw new Error("This account cannot access the configured ChoreBubbles Solo data.");
   return { value: data.value, revision: Number(data.revision || 0) };
 }
 
@@ -112,8 +111,3 @@ export function removePendingOperations(ids) {
   localStorage.setItem(PENDING_KEY, JSON.stringify(remaining));
   return remaining;
 }
-
-// Device identity ("whose phone is this") is always local.
-const ME_KEY = "chorebubbles:me";
-export const getMe = () => localStorage.getItem(ME_KEY);
-export const setMe = (who) => localStorage.setItem(ME_KEY, who);

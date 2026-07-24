@@ -12,9 +12,9 @@ export default defineConfig({
       registerType: "autoUpdate",
       includeAssets: ["apple-touch-icon.png"],
       manifest: {
-        name: "ChoreBubbles",
-        short_name: "ChoreBubbles",
-        description: "A shared household chore ecosystem. Bubbles swell as chores go undone.",
+        name: "ChoreBubbles Solo",
+        short_name: "CB Solo",
+        description: "A personal chore ecosystem where bubbles swell as chores go undone.",
         theme_color: "#0C1B26",
         background_color: "#0C1B26",
         display: "standalone",

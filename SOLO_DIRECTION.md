@@ -19,11 +19,11 @@ This repository is the independent single-person fork of ChoreBubbles.
 
 ## Convert
 
-1. Replace the paired Julian/Kristine identity model with one owner profile.
-2. Replace dual effort tallies and teamwork totals with one rolling tally.
-3. Remove joint and “other person” completion attribution.
-4. Simplify onboarding, vacation mode, history copy, and goal suggestions for one person.
-5. Create solo-specific Supabase authorization and schema migration guidance.
-6. Give the solo app its own deployment target, household data, and GitHub repository.
+1. Done — replaced the paired Julian/Kristine identity model with one editable owner profile.
+2. Done — replaced dual tallies and teamwork totals with one rolling tally and solo streak.
+3. Done — new completions use one `owner` identity; paired choices are absent from the interface.
+4. Done — simplified onboarding, vacation mode, history copy, and goal suggestions.
+5. Done — added a solo-specific Supabase row, one-email allowlist, and migration guidance.
+6. Partly external — the app has its own package, manifest, local storage ID, and no remote; a new repository and deployment destination still need to be chosen.
 
-The first implementation pass should keep stored chore and completion records backward-readable while removing paired-person choices from the interface.
+Legacy `a`, `b`, and `joint` records remain backward-readable and count once toward the solo owner's history and tally.

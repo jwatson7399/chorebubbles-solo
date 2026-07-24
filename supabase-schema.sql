@@ -1,9 +1,10 @@
--- ChoreBubbles secure shared storage
+-- ChoreBubbles Solo secure storage
 --
 -- Before running this file, replace:
---   REPLACE_WITH_YOUR_HOUSEHOLD_ID
---   person.one@example.com
---   person.two@example.com
+--   REPLACE_WITH_YOUR_SOLO_DATA_ID
+--   owner@example.com
+--
+-- Use an ID that is different from every shared ChoreBubbles installation.
 
 create table if not exists public.chorebubbles (
   id text primary key,
@@ -13,16 +14,16 @@ create table if not exists public.chorebubbles (
   updated_at timestamptz not null default now()
 );
 
--- Safe migration for the original ChoreBubbles table.
+-- Safe migration if this Supabase project already has a ChoreBubbles table.
 alter table public.chorebubbles add column if not exists revision bigint not null default 0;
 alter table public.chorebubbles add column if not exists member_emails text[];
 
 insert into public.chorebubbles (id, value, revision, member_emails)
 values (
-  'cb_e3ba63db0abfdac37e3bb98a8e769785',
-  '{"chores":[],"completions":[],"pauses":[],"settings":{"nameA":"Person 1","nameB":"Person 2","weeklyGoal":14,"halfLifeDays":7},"updatedAt":0}'::jsonb,
+  'REPLACE_WITH_YOUR_SOLO_DATA_ID',
+  '{"chores":[],"completions":[],"pauses":[],"settings":{"mode":"solo","ownerName":"You","weeklyGoal":14},"updatedAt":0}'::jsonb,
   0,
-  array['person.one@example.com', 'person.two@example.com']
+  array['owner@example.com']
 )
 on conflict (id) do update
 set member_emails = excluded.member_emails;
