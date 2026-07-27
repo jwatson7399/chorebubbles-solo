@@ -117,6 +117,25 @@ Each emoji was chosen to encode the *same* three-step severity the color already
 
 ---
 
+## 8. Publishing the solo fork and the upstream-port workflow
+
+**Objective.** Turn this single-person fork from a local-only working copy into an independently shareable app, and establish a repeatable way to carry improvements made on the shared (two-person) ChoreBubbles into the solo app *without* re-importing its household assumptions.
+
+**Publishing as a standalone app.** The fork already had its own package name (`chorebubbles-solo`), PWA identity (`CB Solo`), local-storage namespace, and data ID, per `SOLO_DIRECTION.md`. To make it shareable it was published to its **own** public GitHub repo (`jwatson7399/chorebubbles-solo`), deliberately separate from the shared app so neither history nor Supabase credentials are entangled. Key checks before publishing rather than blindly pushing:
+- Confirmed it ships **local-first**: `src/config.js` leaves `SUPABASE_URL` blank and uses a solo-specific data ID, so the app runs on one device with no sign-in and no backend — the user's requirement ("no supabase needed, solo local use"). Supabase remains optional and documented.
+- Verified `vite.config.js` uses `base: "./"` (relative asset paths), so the same build works at any `github.io/<repo>/` path with no repo-name coupling.
+- Confirmed `node_modules`/`dist` are gitignored, the deploy workflow is present, and the tree is clean; then enabled GitHub Pages with the **GitHub Actions** source (via `gh api … pages -f build_type=workflow`) so the included workflow deploys on every push. First deploy verified green at HTTP 200.
+
+**The upstream-port workflow.** Improvements land on the shared app first, then Codex re-implements each on the solo track as a separate commit; the integration method mirrors §7 (read the full diff, prove it green, deploy, verify 200). What's specific here is judging **whether a change is model-neutral or must be adapted**:
+- *Model-neutral* changes are ported byte-for-byte. The priority-ranked bubble mechanics and the decoupling of visual size from a 44px minimum tap target were verified **identical** to the shared app's version (`diff` of `bubblePresentation.js` across repos), because bubble sizing/urgency has nothing to do with how many people live in the house.
+- *Model-coupled* changes are re-expressed for the solo identity. The home-health pulse is the clear example: the shared app credits `a`/`b`/`joint` actors, whereas the solo app has a single `owner`. The ported `healthPulse.js` therefore defines `CREDITED_ACTORS = { owner, a, b, joint }` — `owner` for new records, plus the legacy trio kept **backward-readable** so completions imported from the shared app still count once (consistent with the fork's data policy in `SOLO_DIRECTION.md`). Its test suite was likewise adapted (owner-completion case + a legacy-actor case), and service/reset records stay excluded.
+
+**Results.** The repo is live and shareable at `https://jwatson7399.github.io/chorebubbles-solo/`; three upstream changes (priority ranking, min-visual-size removal, health pulse) were ported and deployed this cycle, each gated on the full test + build and verified at HTTP 200. Test count grew to 42 as the ported suites landed.
+
+**Design rationale.** Keeping the fork a *separate repo with its own history* (rather than a branch or a shared monorepo) is what makes "share the solo app" a one-link action and keeps its Supabase/deployment story independent. The port workflow's discipline is the model-neutral-vs-coupled distinction: it lets most improvements flow across for free while forcing an explicit adaptation — and an adapted test — precisely at the identity boundary that separates the two apps.
+
+---
+
 ## Engineering practice notes
 
 - **Pure logic is extracted and unit-tested.** Scoring (`logModel.js`) and drag physics (`bubblePhysics.js`) live in standalone modules with vitest coverage (`npm test`); the React component consumes them. This keeps the testable rules independent of the UI.
