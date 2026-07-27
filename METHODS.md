@@ -136,6 +136,47 @@ Each emoji was chosen to encode the *same* three-step severity the color already
 
 ---
 
+## 9. Chore details: the definition of done
+
+**Objective.** Give each chore an optional free-text field describing what doing it
+actually entails — *"Dishes: includes cleaning the sink itself."* Authored on the
+parallel Codex track from a written spec (`BUBBLE_DETAILS_SPEC.md`) and integrated per
+the §7 method.
+
+**Methodology.** The tap sheet named a chore and said nothing about what doing it meant.
+For a single user the value is slightly different from the shared app's — there is no one
+to disagree with — but the same gap exists across time: a chore configured months ago
+carries assumptions its author no longer remembers.
+
+`details` is normalized by `normalizeDetails` (trimmed, truncated at 500, non-string
+coerced to `""` so an object can never render as `[object Object]`). It renders **above
+the primary action and is always visible when set**, deliberately not behind a toggle,
+because it answers "what am I committing to" — needed *before* tapping Mark done. A
+collapsed **Status & history** section below the action carries the reference material
+(timing, last done, value, recent completions), keeping logging a two-tap action.
+
+**The trap, and why the fix sits where it does.** `ChoreFields` renders once per step for
+two-step chores, so each step can carry its own details — genuinely desirable, since
+loading and unloading the dishwasher have different definitions of done. But
+`stepFromChore` deliberately **omits** an empty `details` key to keep stored objects
+clean, while `materializeTwoStepChore` projects a step with `{...chore, ...step}`. The
+omitted key therefore could not clear a previous value: switching to a step with no
+details left the *other* step's text showing on it. Found in review, reproduced, and
+fixed in the **projection** rather than the step shape, so stored steps stay clean and
+the leak is closed. Three regression tests pin it.
+
+**Results.** 47 tests pass, build clean, verified live on the dev server: details render
+in the sheet above the action, Status & history expands to timing and recent completions,
+and per-step details no longer bleed across steps.
+
+**Port note.** This is a **model-neutral** change in the §8 sense — a chore's description
+has nothing to do with how many people live in the house — so it is byte-identical to the
+shared app's version apart from the surrounding palette. The kudos feature shipped
+alongside it in the shared app is **not** ported: it requires two people, and there is no
+one to give kudos to here.
+
+---
+
 ## Engineering practice notes
 
 - **Pure logic is extracted and unit-tested.** Scoring (`logModel.js`) and drag physics (`bubblePhysics.js`) live in standalone modules with vitest coverage (`npm test`); the React component consumes them. This keeps the testable rules independent of the UI.
