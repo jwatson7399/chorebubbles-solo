@@ -37,6 +37,7 @@ import {
   enableTwoStepChore,
   isTwoStepChore,
   materializeTwoStepChore,
+  normalizeDetails,
   updateTwoStep,
 } from "./twoStepChore.js";
 
@@ -204,6 +205,16 @@ function activeDaysSinceDone(chore, completions, pauses) {
 
 function urgencyOf(chore, completions, pauses) {
   return activeDaysSinceDone(chore, completions, pauses) / Math.max(chore.freqDays, 0.25);
+}
+
+function choreTimingLabel(chore, completions, pauses) {
+  const delta = activeDaysSinceDone(chore, completions, pauses) - Math.max(Number(chore.freqDays) || 1, 0.25);
+  if (delta > 0) {
+    const days = Math.max(1, Math.ceil(delta));
+    return `${days} day${days === 1 ? "" : "s"} overdue`;
+  }
+  const days = Math.ceil(Math.abs(delta));
+  return days <= 0 ? "Due today" : `Due in ${days} day${days === 1 ? "" : "s"}`;
 }
 
 // Weighted share of chores currently inside their frequency window
@@ -672,6 +683,7 @@ function ScaleSelector({ label, hint, value, min, max, onChange, valueLabel, end
 function ChoreFields({ title, value, onChange }) {
   const importanceText = (level) => ["", "Low", "Mild", "Medium", "High", "Critical"][level];
   const effortText = (level) => ["", "Very easy", "Easy", "Moderate", "Hard", "Very hard"][level];
+  const detailsLength = typeof value.details === "string" ? value.details.length : 0;
   return (
     <section style={title ? { marginTop: 12, padding: "12px 12px 4px", background: "#102733", border: "1px solid #1A3B49", borderRadius: 14 } : undefined}>
       {title && <div style={{ fontFamily: "'Baloo 2', sans-serif", fontSize: 15, fontWeight: 700, color: "#5FE0BB", marginBottom: 8 }}>{title}</div>}
@@ -684,6 +696,21 @@ function ChoreFields({ title, value, onChange }) {
       <ScaleSelector label="Importance" hint="How much does it matter if this slips?" value={value.importance} min={1} max={5} onChange={(importance) => onChange({ importance })} valueLabel={importanceText} endLabels={["Low", "Critical"]} />
       <ScaleSelector label="Effort" hint="How hard is this step?" value={value.difficulty} min={1} max={5} onChange={(difficulty) => onChange({ difficulty })} valueLabel={effortText} endLabels={["Very easy", "Very hard"]} />
       <Stepper label="Goal frequency" value={value.freqDays} min={1} max={60} onChange={(freqDays) => onChange({ freqDays })} format={(days) => `every ${days}d`} />
+      <label style={{ display: "block", padding: "10px 0 12px" }}>
+        <span style={{ display: "block", color: "#E8F3F4", fontSize: 14, fontWeight: 600, marginBottom: 6 }}>Details</span>
+        <textarea
+          rows={3}
+          value={typeof value.details === "string" ? value.details : ""}
+          placeholder="What counts as done? e.g. includes wiping the sink"
+          onChange={(event) => onChange({ details: event.target.value })}
+          style={{ width: "100%", resize: "vertical", background: "#0F2530", border: "1px solid #1E4152", borderRadius: 12, padding: "12px 14px", color: "#E8F3F4", fontSize: 14, lineHeight: 1.45, fontFamily: "inherit", outline: "none" }}
+        />
+        {detailsLength > 400 && (
+          <span style={{ display: "block", marginTop: 4, color: detailsLength > 500 ? "#FF8B7B" : "#7FA3AC", fontSize: 11.5, textAlign: "right" }}>
+            {detailsLength} / 500{detailsLength > 500 ? " · extra text will be trimmed" : ""}
+          </span>
+        )}
+      </label>
     </section>
   );
 }
@@ -806,6 +833,7 @@ export default function ChoreBubbles() {
   const [tab, setTab] = useState("bubbles");
   const [tapChore, setTapChore] = useState(null);
   const [tapWhenDays, setTapWhenDays] = useState(0);
+  const [tapHistoryOpen, setTapHistoryOpen] = useState(false);
   const [serviceOpen, setServiceOpen] = useState(false);
   const [serviceSel, setServiceSel] = useState({});
   const [editChore, setEditChore] = useState(null);
@@ -1100,7 +1128,9 @@ export default function ChoreBubbles() {
   };
 
   const saveChore = (ch) => {
-    const normalized = isTwoStepChore(ch) ? materializeTwoStepChore(ch) : ch;
+    const normalized = isTwoStepChore(ch)
+      ? materializeTwoStepChore(ch)
+      : { ...ch, details: normalizeDetails(ch.details) };
     const chore = normalized.id ? normalized : { ...normalized, id: uid(), createdAt: realNow() };
     if (commit({ type: "chore:upsert", chore })) setEditChore(null);
   };
@@ -1230,6 +1260,7 @@ export default function ChoreBubbles() {
     view.chores.map((chore) => [chore.id, choreHistoryFor(view.completions, chore.id)])
   );
   const editChoreHistory = editChore?.id ? choreHistories.get(editChore.id) || [] : [];
+  const tapChoreHistory = tapChore?.id ? choreHistories.get(tapChore.id) || [] : [];
   const suggestedBubbleIds = new Set(
     bubbleSuggestionsVisible && suggestion ? suggestion.chores.map((chore) => chore.id) : []
   );
@@ -1350,7 +1381,7 @@ export default function ChoreBubbles() {
               🏖 Paused. Bubble growth and your tally are frozen until you resume.
             </div>
           )}
-          <BubbleField chores={view.chores} completions={view.completions} pauses={pauses} onTap={(ch) => { setTapWhenDays(0); setTapChore(ch); }} popId={popId} simDays={simDays} suggestedIds={suggestedBubbleIds} />
+          <BubbleField chores={view.chores} completions={view.completions} pauses={pauses} onTap={(ch) => { setTapWhenDays(0); setTapHistoryOpen(false); setTapChore(ch); }} popId={popId} simDays={simDays} suggestedIds={suggestedBubbleIds} />
           <div style={{ padding: "0 20px 10px", display: "flex", flexDirection: "column", gap: 8 }}>
             <div style={{ display: "flex", gap: 8 }}>
               <button
@@ -1635,11 +1666,16 @@ export default function ChoreBubbles() {
 
       {/* Complete chore */}
       {tapChore && (
-        <Modal onClose={() => { setTapChore(null); setTapWhenDays(0); }}>
+        <Modal onClose={() => { setTapChore(null); setTapWhenDays(0); setTapHistoryOpen(false); }}>
           <div style={{ fontFamily: "'Baloo 2', sans-serif", fontSize: 19, fontWeight: 700 }}>{tapChore.name}</div>
           <div style={{ fontSize: 13, color: "#7FA3AC", margin: "4px 0 16px" }}>
             Last done {timeAgo(lastDone(tapChore, view.completions))} · worth {tapChore.difficulty} pts
           </div>
+          {tapChore.details && (
+            <div style={{ margin: "0 0 16px", padding: "11px 13px", background: "#102733", border: "1px solid #1A3B49", borderRadius: 12, color: "#E8F3F4", fontSize: 13.5, lineHeight: 1.5, whiteSpace: "pre-wrap", overflowWrap: "anywhere" }}>
+              {tapChore.details}
+            </div>
+          )}
           <div style={{ fontSize: 12, color: "#7FA3AC", marginBottom: 7 }}>When was it done?</div>
           <div style={{ display: "flex", gap: 7, marginBottom: 18, flexWrap: "wrap" }}>
             {[{ d: 0, l: "Just now" }, { d: 1, l: "Yesterday" }, { d: 2, l: "2 days ago" }, { d: 3, l: "3 days ago" }].map((o) => (
@@ -1655,6 +1691,40 @@ export default function ChoreBubbles() {
           <button onClick={() => logCompletion(tapChore)} style={{ ...btnStyle("#5FE0BB"), width: "100%" }}>
             Mark done
           </button>
+          <button
+            type="button"
+            aria-expanded={tapHistoryOpen}
+            onClick={() => setTapHistoryOpen((open) => !open)}
+            style={{ width: "100%", marginTop: 12, padding: "10px 2px", border: "none", borderTop: "1px solid #244653", background: "transparent", color: "#B9D2D8", font: "inherit", fontSize: 13.5, fontWeight: 700, textAlign: "left", cursor: "pointer" }}
+          >
+            {tapHistoryOpen ? "▾" : "▸"} Status &amp; history
+          </button>
+          {tapHistoryOpen && (
+            <section style={{ paddingTop: 4 }}>
+              <div style={{ display: "grid", gap: 7, marginBottom: 14, padding: "11px 13px", background: "#102733", border: "1px solid #1A3B49", borderRadius: 12, fontSize: 12.5 }}>
+                <div style={{ display: "flex", justifyContent: "space-between", gap: 12 }}><span style={{ color: "#7FA3AC" }}>Timing</span><strong>{choreTimingLabel(tapChore, view.completions, pauses)}</strong></div>
+                {tapChoreHistory[0] && <div style={{ display: "flex", justifyContent: "space-between", gap: 12 }}><span style={{ color: "#7FA3AC" }}>Last done</span><strong>✓ {timeAgo(tapChoreHistory[0].ts)}</strong></div>}
+                <div style={{ display: "flex", justifyContent: "space-between", gap: 12 }}><span style={{ color: "#7FA3AC" }}>Value</span><strong>worth {tapChore.difficulty} pts</strong></div>
+              </div>
+              <div style={{ fontFamily: "'Baloo 2', sans-serif", fontSize: 14.5, fontWeight: 700, marginBottom: 6 }}>Recent history</div>
+              {tapChoreHistory.length === 0 ? (
+                <div style={{ color: "#7FA3AC", fontSize: 12.5 }}>No completions logged yet.</div>
+              ) : (
+                <div style={{ background: "#102733", border: "1px solid #1A3B49", borderRadius: 12, padding: "0 12px" }}>
+                  {tapChoreHistory.slice(0, 8).map((entry) => (
+                    <div key={entry.id} style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, padding: "9px 0", borderBottom: "1px solid #1A3542" }}>
+                      <div style={{ minWidth: 0 }}>
+                        <div style={{ color: "#E8F3F4", fontSize: 12.5, fontWeight: 700 }}>{completionActor(entry, settings)}</div>
+                        <div style={{ color: "#7FA3AC", fontSize: 11.5 }}>{timeAgo(entry.ts)}</div>
+                      </div>
+                      <strong style={{ color: entry.by === "service" || entry.by === "reset" ? "#9FB6BC" : "#5FE0BB", fontSize: 12 }}>{completionImpact(entry, settings)}</strong>
+                    </div>
+                  ))}
+                  {tapChoreHistory.length > 8 && <div style={{ padding: "9px 0", color: "#7FA3AC", fontSize: 12 }}>+ {tapChoreHistory.length - 8} earlier</div>}
+                </div>
+              )}
+            </section>
+          )}
         </Modal>
       )}
 
